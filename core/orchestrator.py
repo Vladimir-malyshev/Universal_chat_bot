@@ -136,9 +136,39 @@ async def process_universal_message(msg: UniversalMessage, adapter: BaseChannelA
             return
 
         # 5. Обработка Tool Calling (Double-Hop)
+        import re
+        import json
+        
+        # Паттерн для перехвата XML-вызовов (GLM/Qwen на Chutes)
+        # Пример: <toolcall>searchweb <argkey>query</argkey> <argvalue>...</argvalue> </tool_call>
+        tool_regex = r"<toolcall>(?P<name>.*?)<argkey>.*?</argkey>\s*<argvalue>(?P<value>.*?)</argvalue>.*?</tool_?call>"
+        
         search_msg_id = None
+        actions = []
+        
+        # Собираем официальные вызовы
         if response_msg.tool_calls:
-            logger.info(f"LLM requested tool calls: {len(response_msg.tool_calls)}")
+            for tc in response_msg.tool_calls:
+                actions.append({
+                    "type": "official",
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "args": json.loads(tc.function.arguments)
+                })
+        
+        # Собираем Regex-вызовы из текста
+        content_text = response_msg.content or ""
+        matches = list(re.finditer(tool_regex, content_text, re.DOTALL | re.IGNORECASE))
+        for match in matches:
+            actions.append({
+                "type": "regex",
+                "name": match.group("name").strip(),
+                "args": {"query": match.group("value").strip()},
+                "raw_text": match.group(0)
+            })
+
+        if actions:
+            logger.info(f"Detected {len(actions)} tool actions (Official: {len(response_msg.tool_calls or [])}, Regex: {len(matches)})")
             
             # UX: Индикация поиска
             search_msg_id = await adapter.send_text(
@@ -146,32 +176,54 @@ async def process_universal_message(msg: UniversalMessage, adapter: BaseChannelA
                 "🔍 <i>Ищу актуальные данные в интернете...</i>"
             )
             
-            messages.append(response_msg) # Добавляем сообщение ассистента с tool_calls в историю
+            # Добавляем сообщение ассистента в историю
+            # Если это был только Regex-вызов, OpenAI API может не принять его как assistant message без content
+            messages.append(response_msg)
             
-            for tool_call in response_msg.tool_calls:
-                import json
-                function_name = tool_call.function.name
-                arguments = json.loads(tool_call.function.arguments)
+            for action in actions:
+                f_name = action["name"]
+                f_args = action["args"]
                 
                 # Выполнение инструмента
-                result = await execute_tool(function_name, arguments)
+                result = await execute_tool(f_name, f_args)
                 
                 # Добавляем результат в историю
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": function_name,
-                    "content": result
-                })
+                if action["type"] == "official":
+                    logger.info(f"Adding official tool result for {f_name} to context.")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": action["id"],
+                        "name": f_name,
+                        "content": result
+                    })
+                else:
+                    # Для Regex-вызовов добавляем как системное сообщение для четкого разделения контекста
+                    logger.info(f"Adding regex tool result for {f_name} as SYSTEM message.")
+                    messages.append({
+                        "role": "system",
+                        "content": f"[ОБЪЕКТИВНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА ({f_name})]:\n{result}\n\nИнструкция: Используй эти данные как единственный источник истины для ответа. Если данных нет или там ошибка, честно скажи об этом пользователю."
+                    })
             
+            # Логируем итоговый набор сообщений (только роли и длину контента для безопасности)
+            for i, m in enumerate(messages):
+                try:
+                    role = m.role if hasattr(m, 'role') else m.get('role')
+                    content = m.content if hasattr(m, 'content') else m.get('content', '')
+                    logger.debug(f"Message {i} | Role: {role} | Length: {len(str(content))}")
+                except Exception as log_err:
+                    logger.warning(f"Failed to log message {i}: {log_err}")
+
             # Второй вызов LLM (финальный ответ)
             response_msg = await call_llm(messages, attachments=None, tools=None)
 
-        if not response_msg or not response_msg.content:
+        if not response_msg or (not response_msg.content and not response_msg.tool_calls):
              await adapter.send_text(msg.user_id, "Не удалось сформировать ответ после поиска.")
              return
 
-        llm_reply = response_msg.content
+        llm_reply = response_msg.content or ""
+        
+        # Очистка финального ответа от возможных остаточных XML-тегов (галлюцинации)
+        llm_reply = re.sub(tool_regex, "", llm_reply, flags=re.DOTALL | re.IGNORECASE).strip()
 
         # 6. Сохранение и ответ
         add_to_context(session_id, "user", msg.text or "") # Сохраняем как текст

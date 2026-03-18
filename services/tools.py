@@ -16,14 +16,26 @@ async def search_web(query: str, max_results: int = 5) -> str:
         # DDGS() в новых версиях поддерживает контекстный менеджер
         with DDGS() as ddgs:
             ddgs_gen = ddgs.text(query, max_results=max_results)
-            for r in ddgs_gen:
-                results.append(f"Title: {r['title']}\nSnippet: {r['body']}\nLink: {r['href']}\n")
+            if ddgs_gen:
+                for i, r in enumerate(ddgs_gen):
+                    # Логируем только заголовки первых двух результатов для отладки
+                    if i < 2:
+                        logger.info(f"Search Result {i+1}: {r['title']}")
+                    results.append(f"Title: {r['title']}\nSnippet: {r['body']}\nLink: {r['href']}\n")
         
         if not results:
-            return "Поиск не дал результатов."
+            logger.warning(f"No results found for query: {query}")
+            return "Поиск не дал результатов. Возможно, запрос слишком специфичен или данных по нему нет."
         
+        logger.info(f"Found {len(results)} results for query: {query}")
         return "\n---\n".join(results)
+
     except Exception as e:
+        error_msg = str(e)
+        if "Ratelimit" in error_msg:
+            logger.error(f"DuckDuckGo Ratelimit hit for query: {query}")
+            return "Ошибка: Превышен лимит запросов к поисковой системе (Ratelimit). Пожалуйста, попробуйте позже."
+        
         logger.error(f"Error during web search: {e}")
         return f"Ошибка при поиске в интернете: {e}"
 
