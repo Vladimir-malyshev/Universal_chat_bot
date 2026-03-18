@@ -56,19 +56,41 @@ class TelegramAdapter(BaseChannelAdapter):
         )
 
     async def send_text(self, user_id: str, text: str) -> None:
-        """Отправка сообщения через Telegram API."""
+        """Отправка сообщения через Telegram API с Fallback механизмом."""
+        from core.formatter import md_to_html, strip_all_tags
+        
         url = f"{self.api_base}/sendMessage"
+        
+        # Попытка №1: Отправка с HTML форматированием
+        formatted_text = md_to_html(text)
         payload = {
             "chat_id": user_id,
-            "text": text,
-            "parse_mode": "Markdown"
+            "text": formatted_text,
+            "parse_mode": "HTML"
         }
+        
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(url, json=payload, timeout=10.0)
+                if response.status_code == 200:
+                    return
+                
+                # Попытка №2: Fallback если HTML невалиден (ошибка 400)
+                logger.warning(f"Telegram HTML send failed ({response.status_code}). Falling back to plain text. Error: {response.text}")
+                
+                fallback_text = strip_all_tags(formatted_text)
+                payload["text"] = fallback_text
+                payload.pop("parse_mode", None) # Убираем форматирование
+                
+                response = await client.post(url, json=payload, timeout=10.0)
+                if response.status_code != 200:
+                    logger.error(f"Telegram Fallback also failed: {response.status_code} - {response.text}")
                 response.raise_for_status()
+                
             except Exception as e:
-                logger.error(f"Failed to send Telegram message to {user_id}: {e}")
+                logger.error(f"Failed to send Telegram message to {user_id}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
 
     async def get_file_url(self, file_id: str) -> Optional[str]:
         """Получает прямую ссылку на файл в Telegram."""

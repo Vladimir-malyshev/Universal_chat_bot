@@ -8,15 +8,15 @@ CHUTES_BASE_URL = "https://llm.chutes.ai/v1"
 
 # Список моделей в порядке приоритета для Fallback-механизма
 MODELS_PRIORITY = [
-    "qwen/Qwen3-VL-235B-A22B-Instruct", # Основная, самая умная
-    "zai-org/GLM-4.6V",                 # Резерв 1
-    "Qwen/Qwen2.5-VL-32B-Instruct"      # Резерв 2 (быстрая)
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-TEE", # Основная, самая умная
+    "zai-org/GLM-4.6V",                       # Резерв 1
+    "Qwen/Qwen2.5-VL-32B-Instruct"            # Резерв 2 (быстрая)
 ]
 
 # Для обратной совместимости или детальной информации (опционально)
 MODELS = [
     {
-        "id": "qwen/Qwen3-VL-235B-A22B-Instruct",
+        "id": "Qwen/Qwen3-235B-A22B-Instruct-2507-TEE",
         "name": "Qwen3 VL (Main)",
         "context_length": 131072,
         "vision_support": True
