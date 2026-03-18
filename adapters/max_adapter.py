@@ -38,11 +38,19 @@ class MaxAdapter(BaseChannelAdapter):
     async def send_text(self, user_id: str, text: str) -> None:
         async with httpx.AsyncClient() as client:
             headers = {"Authorization": f"Bearer {self.max_token}"}
-            payload_data = {"user_id": user_id, "text": text}
+            payload_data = {
+                "user_id": user_id, 
+                "text": text
+            }
             try:
-                # Placeholder for real HTTP request to MAX API
                 logger.info(f"Sending to MAX user {user_id}: {text[:50]}...")
-                # await client.post(f"{self.max_url}/messages", json=payload_data, headers=headers)
+                response = await client.post(
+                    self.max_url, 
+                    json=payload_data, 
+                    headers=headers,
+                    timeout=10.0
+                )
+                response.raise_for_status()
             except Exception as e:
                 logger.error(f"Failed to send to MAX: {e}")
 

@@ -2,8 +2,8 @@
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
-# Импортируем DEFAULT_MODEL и функции из mod_llm
-from mod_llm import DEFAULT_MODEL, get_model_info
+# Импортируем get_default_model и функции из mod_llm
+from mod_llm import get_default_model, get_model_info
 
 from config import MAX_HISTORY, CONTEXT_TIMEOUT
 # Импортируем новые модели данных
@@ -69,7 +69,7 @@ def get_chat_model(chat_id: int) -> str:
     Получение ID модели для конкретного чата.
     (Совместимость со старым API)
     """
-    return chat_settings[chat_id].current_model.get("id", DEFAULT_MODEL)
+    return chat_settings[chat_id].current_model.get("id", get_default_model())
 
 def set_chat_model(chat_id: int, model_id: str):
     """
@@ -85,14 +85,15 @@ def set_chat_model(chat_id: int, model_id: str):
         chat_settings[chat_id].current_model = model_info.copy()
         logger.info(f"Модель для чата {chat_id} установлена на '{model_id}'")
     else:
-        logger.warning(f"Попытка установить неизвестную модель '{model_id}' для чата {chat_id}. Используется DEFAULT_MODEL.")
+        logger.warning(f"Попытка установить неизвестную модель '{model_id}' для чата {chat_id}. Используется дефолтная модель.")
         # Устанавливаем модель по умолчанию
-        default_model_info = get_model_info(DEFAULT_MODEL)
+        default_model_id = get_default_model()
+        default_model_info = get_model_info(default_model_id)
         if default_model_info:
             chat_settings[chat_id].current_model = default_model_info.copy()
         else:
-            # На всякий случай, если DEFAULT_MODEL тоже не найден
-            chat_settings[chat_id].current_model = {"id": DEFAULT_MODEL}
+            # На всякий случай
+            chat_settings[chat_id].current_model = {"id": default_model_id}
 
 # --- Функции для работы с голосом ---
 def get_voice_mode(chat_id: int) -> bool:

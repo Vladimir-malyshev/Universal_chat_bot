@@ -4,8 +4,8 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-# Импортируем DEFAULT_MODEL и get_model_info для инициализации по умолчанию
-from mod_llm import DEFAULT_MODEL, get_model_info
+# Импортируем get_default_model и get_model_info для инициализации по умолчанию
+from mod_llm import get_default_model, get_model_info
 
 # --- Вспомогательная функция для получения информации о модели по умолчанию ---
 def _get_default_model_info() -> Dict[str, Any]:
@@ -13,18 +13,18 @@ def _get_default_model_info() -> Dict[str, Any]:
     Получает информацию о модели, используемой по умолчанию.
     Возвращает копию словаря из MODELS или базовый словарь, если модель не найдена.
     """
-    default_info = get_model_info(DEFAULT_MODEL)
+    default_id = get_default_model()
+    default_info = get_model_info(default_id)
     if default_info:
         # Возвращаем копию, чтобы избежать неожиданного изменения оригинала
         return default_info.copy() 
     else:
-        # На случай, если DEFAULT_MODEL указывает на несуществующую модель
-        # (маловероятно, но защита от ошибок не помешает)
+        # На случай, если get_default_model() указывает на несуществующую модель
         return {
-            "id": DEFAULT_MODEL,
+            "id": default_id,
             "name": "Unknown Model",
             "family": "unknown",
-            "input_token_limit": 32768, # Разумное значение по умолчанию
+            "input_token_limit": 32768, 
         }
 # --- Конец вспомогательной функции ---
 

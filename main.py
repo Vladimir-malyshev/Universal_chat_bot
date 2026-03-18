@@ -1,10 +1,11 @@
 import logging
 from fastapi import FastAPI
 from adapters.max_adapter import router as max_router
+from adapters.telegram_adapter import router as telegram_router
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -13,8 +14,9 @@ app = FastAPI(
     description="FastAPI + GigaAM Omnichannel Platform"
 )
 
-# Подключение роутера MAX
+# Подключение роутеров
 app.include_router(max_router)
+app.include_router(telegram_router)
 
 @app.get("/")
 def health_check():

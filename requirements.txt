@@ -1,0 +1,11 @@
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+httpx==0.28.1
+pydantic-settings==2.2.1
+openai==1.13.3
+python-dotenv==1.0.1
+aiofiles==23.2.1
+torch>=2.5.0
+torchaudio>=2.5.0
+pyannote.audio==3.1.1
+gigaam @ git+https://github.com/salute-developers/GigaAM.git
