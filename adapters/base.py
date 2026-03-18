@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 from models.universal import UniversalMessage
 
 class BaseChannelAdapter(ABC):
@@ -9,6 +9,11 @@ class BaseChannelAdapter(ABC):
         pass
     
     @abstractmethod
-    async def send_text(self, user_id: str, text: str) -> None:
-        """Sends text to user in specific channel"""
+    async def send_text(self, user_id: str, text: str) -> Optional[str]:
+        """Sends text to user in specific channel. Returns message_id if successful."""
+        pass
+
+    @abstractmethod
+    async def edit_text(self, user_id: str, message_id: str, text: str) -> bool:
+        """Edits existing message. Returns True if successful."""
         pass

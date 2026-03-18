@@ -1,7 +1,7 @@
 import os
 import logging
 import httpx
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from fastapi import APIRouter, Request, BackgroundTasks
 
 from models.universal import UniversalMessage, Attachment
@@ -55,7 +55,7 @@ class TelegramAdapter(BaseChannelAdapter):
             attachments=attachments
         )
 
-    async def send_text(self, user_id: str, text: str) -> None:
+    async def send_text(self, user_id: str, text: str) -> Optional[str]:
         """Отправка сообщения через Telegram API с Fallback механизмом."""
         from core.formatter import md_to_html, strip_all_tags
         
@@ -73,7 +73,8 @@ class TelegramAdapter(BaseChannelAdapter):
             try:
                 response = await client.post(url, json=payload, timeout=10.0)
                 if response.status_code == 200:
-                    return
+                    data = response.json()
+                    return str(data["result"]["message_id"])
                 
                 # Попытка №2: Fallback если HTML невалиден (ошибка 400)
                 logger.warning(f"Telegram HTML send failed ({response.status_code}). Falling back to plain text. Error: {response.text}")
@@ -83,7 +84,10 @@ class TelegramAdapter(BaseChannelAdapter):
                 payload.pop("parse_mode", None) # Убираем форматирование
                 
                 response = await client.post(url, json=payload, timeout=10.0)
-                if response.status_code != 200:
+                if response.status_code == 200:
+                    data = response.json()
+                    return str(data["result"]["message_id"])
+                else:
                     logger.error(f"Telegram Fallback also failed: {response.status_code} - {response.text}")
                 response.raise_for_status()
                 
@@ -91,6 +95,38 @@ class TelegramAdapter(BaseChannelAdapter):
                 logger.error(f"Failed to send Telegram message to {user_id}: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
+            return None
+
+    async def edit_text(self, user_id: str, message_id: str, text: str) -> bool:
+        """Редактирование сообщения через Telegram API."""
+        from core.formatter import md_to_html, strip_all_tags
+        
+        url = f"{self.api_base}/editMessageText"
+        formatted_text = md_to_html(text)
+        
+        payload = {
+            "chat_id": user_id,
+            "message_id": int(message_id),
+            "text": formatted_text,
+            "parse_mode": "HTML"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, json=payload, timeout=10.0)
+                if response.status_code == 200:
+                    return True
+                
+                logger.warning(f"Telegram HTML edit failed ({response.status_code}). Falling back to plain text. Error: {response.text}")
+                
+                payload["text"] = strip_all_tags(formatted_text)
+                payload.pop("parse_mode", None)
+                
+                response = await client.post(url, json=payload, timeout=10.0)
+                return response.status_code == 200
+            except Exception as e:
+                logger.error(f"Failed to edit Telegram message {message_id}: {e}")
+                return False
 
     async def get_file_url(self, file_id: str) -> Optional[str]:
         """Получает прямую ссылку на файл в Telegram."""
@@ -111,18 +147,29 @@ telegram_adapter_instance = TelegramAdapter()
 @router.post("/webhook/telegram")
 async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     from core.orchestrator import process_universal_message
+    from services.audio_utils import download_file, generate_unique_filename
     
     try:
         payload = await request.json()
         msg = telegram_adapter_instance.parse_message(payload)
         
         if msg:
-            # Пре-процессинг ссылок на файлы (критично для Telegram)
+            # Пре-процессинг ссылок на файлы
             for att in msg.attachments:
                 if att.file_path:
-                   real_url = await telegram_adapter_instance.get_file_url(att.file_path)
-                   if real_url:
-                       att.url = real_url
+                    # 1. Получаем прямую ссылку
+                    real_url = await telegram_adapter_instance.get_file_url(att.file_path)
+                    if real_url:
+                        att.url = real_url
+                        
+                        # 2. Если это аудио (голос) или изображение, скачиваем его во временный файл
+                        if att.type in ["audio", "image"]:
+                            ext = "ogg" if att.type == "audio" else "jpg"
+                            temp_file = generate_unique_filename(ext)
+                            if await download_file(real_url, temp_file):
+                                # Сохраняем локальный путь в file_path для оркестратора
+                                att.file_path = temp_file
+                                logger.info(f"{att.type.capitalize()} downloaded to {temp_file}")
 
             background_tasks.add_task(process_universal_message, msg, telegram_adapter_instance)
             

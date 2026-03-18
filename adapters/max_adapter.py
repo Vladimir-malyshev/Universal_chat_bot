@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Any
+from typing import Any, Optional
 import httpx
 from fastapi import APIRouter, Request, BackgroundTasks
 
@@ -35,7 +35,7 @@ class MaxAdapter(BaseChannelAdapter):
             attachments=attachments
         )
 
-    async def send_text(self, user_id: str, text: str) -> None:
+    async def send_text(self, user_id: str, text: str) -> Optional[str]:
         async with httpx.AsyncClient() as client:
             headers = {"Authorization": f"Bearer {self.max_token}"}
             payload_data = {
@@ -51,8 +51,17 @@ class MaxAdapter(BaseChannelAdapter):
                     timeout=10.0
                 )
                 response.raise_for_status()
+                # Предполагаем, что MAX возвращает ID в ответе, если нет - просто None
+                data = response.json()
+                return str(data.get("message_id")) if data else None
             except Exception as e:
                 logger.error(f"Failed to send to MAX: {e}")
+                return None
+
+    async def edit_text(self, user_id: str, message_id: str, text: str) -> bool:
+        """MAX Messenger edit message placeholder."""
+        logger.warning("Edit message not implemented for MAX adapter.")
+        return False
 
 max_adapter_instance = MaxAdapter()
 
