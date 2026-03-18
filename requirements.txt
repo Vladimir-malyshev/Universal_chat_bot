@@ -1,7 +1,0 @@
-pyTelegramBotAPI
-python-dotenv
-Pillow
-requests
-google-genai
-pydub
-librosa
