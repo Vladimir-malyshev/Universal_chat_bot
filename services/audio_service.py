@@ -1,81 +1,46 @@
-# services/audio_service.py
-"""Сервис озвучки: сначала текстовый статус, затем отдельный эмодзи, по готовности — удаление эмодзи, правка статуса и отправка аудио."""
+import asyncio
 import logging
 import os
-from aiogram import Bot
-from aiogram.types import FSInputFile
-from audio_utils import generate_audio_to_opus
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-async def send_audio_with_progress(
-    bot: Bot,
-    chat_id: int,
-    text: str,
-    reply_to_message_id: int | None = None
-):
-    # 1) Текстовый статус
-    status_msg = await bot.send_message(
-        chat_id,
-        "Генерирую аудиоответ, это может занять несколько минут..."
-    )
-    # 2) Отдельный эмодзи (большой/анимируется, пока один)
-    icon_msg = await bot.send_message(chat_id, "🎙")
-
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    tts_model = "gemini-2.5-flash-preview-tts"
-
-    ok = False
-    result_path_or_error = ""
+@lru_cache(maxsize=1)
+def get_gigaam_pipeline():
+    """Загрузка пайплайна GigaAM строго один раз при старте."""
+    logger.info("Loading GigaAM v2_rnnt model into memory...")
     try:
-        ok, result_path_or_error = await generate_audio_to_opus(text, tts_model, google_api_key)
+        from gigaam import GigaAM
+        return GigaAM(model_name="v2_rnnt")
+    except ImportError:
+        logger.error("gigaam package not installed.")
+        return None
 
-        # Удаляем эмодзи независимо от успеха
-        try:
-            await bot.delete_message(chat_id, icon_msg.message_id)
-        except Exception:
-            pass
-
-        if not ok:
-            # Обновляем статус — ошибка
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=status_msg.message_id,
-                    text=f"❌ Ошибка генерации аудио: {result_path_or_error}"
-                )
-            except Exception:
-                pass
-            return
-
-        # Обновляем статус — готово
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_msg.message_id,
-                text="🎙 Голосовой ответ готов!"
-            )
-        except Exception:
-            pass
-
-        # Отправляем файл
-        audio = FSInputFile(result_path_or_error)
-        await bot.send_audio(chat_id, audio, reply_to_message_id=reply_to_message_id)
-
+def _transcribe_audio_sync(file_path: str) -> str:
+    model = get_gigaam_pipeline()
+    if not model:
+        logger.error("ASR Model is not loaded. Cannot transcribe.")
+        return ""
+    
+    try:
+        logger.info(f"Starting longform transcription for {file_path}")
+        utterances = model.transcribe_longform(
+            file_path, 
+            vad_model="pyannote/segmentation-3.0"
+        )
+        if isinstance(utterances, list):
+            text = " ".join(item.get("transcription", "") for item in utterances if "transcription" in item)
+            return text.strip()
+        return str(utterances)
     except Exception as e:
-        logger.exception(f"TTS send error: {e}")
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_msg.message_id,
-                text=f"❌ Ошибка при отправке аудио: {e}"
-            )
-        except Exception:
-            pass
-    finally:
-        # Чистим временный файл, если он существует
-        try:
-            if ok and isinstance(result_path_or_error, str) and os.path.exists(result_path_or_error):
-                os.remove(result_path_or_error)
-        except Exception:
-            pass
+        logger.exception(f"Error in transcription: {e}")
+        return ""
+
+async def transcribe_audio_async(file_path: str) -> str:
+    """Асинхронно вызывает тяжелый инференс ASR через asyncio.to_thread, не блокируя Event Loop."""
+    try:
+        text = await asyncio.to_thread(_transcribe_audio_sync, file_path)
+        return text
+    except Exception as e:
+        logger.exception(f"asyncio.to_thread ASR error: {e}")
+        return ""
