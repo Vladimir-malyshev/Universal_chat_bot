@@ -6,70 +6,9 @@ from adapters.base import BaseChannelAdapter
 from services.audio_service import transcribe_audio_async
 from services.context_service import get_context, add_to_context
 from services.persona_service import persona_service
-from mod_llm import CHUTES_BASE_URL, MODELS_PRIORITY
+from services.llm_service import call_llm
 
 logger = logging.getLogger(__name__)
-
-async def call_llm(messages: list, attachments: list = None, tools: list = None) -> any:
-    """
-    Вызов LLM с поддержкой Vision и Tool Calling. 
-    Возвращает объект сообщения (с текстом или tool_calls).
-    """
-    api_key = os.getenv("CHUTES_API_KEY")
-    if not api_key:
-        logger.error("CHUTES_API_KEY not found in environment.")
-        return None
-
-    client = AsyncOpenAI(base_url=CHUTES_BASE_URL, api_key=api_key)
-    
-    # Мультимодальная обработка для последнего сообщения (если есть вложения)
-    if attachments:
-        # Находим последнее сообщение от пользователя в списке
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i]["role"] == "user" and isinstance(messages[i]["content"], str):
-                text = messages[i]["content"]
-                user_content = [{"type": "text", "text": text}]
-                
-                for att in attachments:
-                    if att.type == 'image' and (att.url or att.file_path):
-                        img_url = att.url
-                        user_content.append({
-                            "type": "image_url",
-                            "image_url": {"url": img_url}
-                        })
-                
-                messages[i]["content"] = user_content
-                break
-
-    # Цикл Fallback (CRITICAL)
-    for model_id in MODELS_PRIORITY:
-        try:
-            logger.info(f"Attempting LLM call with model: {model_id}")
-            
-            kwargs = {
-                "model": model_id,
-                "messages": messages,
-                "timeout": 45.0
-            }
-            if tools:
-                kwargs["tools"] = tools
-                kwargs["tool_choice"] = "auto"
-
-            try:
-                response = await client.chat.completions.create(**kwargs)
-                return response.choices[0].message
-            except Exception as e:
-                if "tool choice requires" in str(e).lower() and "auto" in str(e).lower():
-                    logger.warning(f"Model {model_id} does not support explicit tool_choice='auto' on Chutes. Retrying without it.")
-                    kwargs.pop("tool_choice", None)
-                    response = await client.chat.completions.create(**kwargs)
-                    return response.choices[0].message
-                raise e
-        except Exception as e:
-            logger.warning(f"Модель {model_id} упала или таймаут: {e}, переключаюсь на следующую...")
-            continue
-    
-    return None
 
 async def process_universal_message(msg: UniversalMessage, adapter: BaseChannelAdapter):
     temp_files = []

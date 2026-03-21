@@ -1,3 +1,4 @@
+# TODO: В будущем заменить локальную загрузку модели на вызов внешнего сервиса (speech-service)
 import asyncio
 import logging
 import os

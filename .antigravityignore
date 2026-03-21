@@ -1,0 +1,25 @@
+# Зависимости (это самая главная черная дыра для квот)
+node_modules/
+venv/
+.env
+
+# Сборки и кэш
+dist/
+build/
+out/
+.next/
+.cache/
+
+# Системные и Git файлы
+.git/
+.DS_Store
+
+# Базы данных и логи
+*.sqlite
+*.db
+*.log
+
+# Тяжелая медиа-статика
+public/images/
+*.mp4
+*.svg
