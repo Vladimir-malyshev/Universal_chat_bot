@@ -20,28 +20,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """События жизненного цикла FastAPI."""
+    logger.info("Universal Bot Core is starting up...")
+    # Здесь можно добавить инициализацию пулов БД или других легковесных сервисов
+    yield
+    logger.info("Universal Bot Core is shutting down...")
+
 app = FastAPI(
     title="Omnichannel AI Core",
-    description="FastAPI + GigaAM Omnichannel Platform"
+    description="FastAPI + GigaAM Omnichannel Platform",
+    lifespan=lifespan
 )
 
 # Подключение роутеров
 app.include_router(max_router)
 app.include_router(telegram_router)
-
-@app.on_event("startup")
-async def startup_event():
-    """Предзагрузка тяжелых моделей при старте сервера."""
-    from services.audio_service import get_gigaam_pipeline
-    logger.info("Universal Bot Core is starting up...")
-    # Запускаем загрузку модели ASR в фоновом режиме (через asyncio.to_thread или просто вызвав)
-    # Поскольку get_gigaam_pipeline закеширован lru_cache, первый вызов загрузит модель
-    try:
-        import asyncio
-        await asyncio.to_thread(get_gigaam_pipeline)
-        logger.info("GigaAM v3 STT model pre-loaded successfully.")
-    except Exception as e:
-        logger.error(f"Failed to pre-load GigaAM model: {e}")
 
 @app.get("/")
 def health_check():

@@ -1,44 +1,68 @@
-# TODO: В будущем заменить локальную загрузку модели на вызов внешнего сервиса (speech-service)
 import asyncio
 import logging
 import os
-from functools import lru_cache
+import httpx
 
 logger = logging.getLogger(__name__)
 
-@lru_cache(maxsize=1)
-def get_gigaam_pipeline():
-    """Загрузка пайплайна GigaAM v3 строго один раз при старте."""
-    model_id = "v3_e2e_ctc"
-    logger.info(f"Loading GigaAM {model_id} model into memory...")
-    try:
-        import gigaam
-        # В V3 используем load_model вместо прямого создания класса
-        return gigaam.load_model(model_id)
-    except Exception as e:
-        logger.error(f"Failed to load GigaAM model: {e}")
-        return None
-
-def _transcribe_audio_sync(file_path: str) -> str:
-    """Синхронная транскрибация файла."""
-    model = get_gigaam_pipeline()
-    if not model:
-        logger.error("ASR Model is not loaded. Cannot transcribe.")
-        return ""
-    
-    try:
-        logger.info(f"Transcribing {file_path} using GigaAM v3")
-        # Метод transcribe в v3 возвращает текст с пунктуацией
-        text = model.transcribe(file_path)
-        return text.strip() if text else ""
-    except Exception as e:
-        logger.exception(f"Error in transcription: {e}")
-        return ""
-
 async def transcribe_audio_async(file_path: str) -> str:
-    """Асинхронная обертка для транскрибации."""
+    """Асинхронная загрузка файла на внешний STT сервис и ожидание результата."""
+    base_url = os.getenv("STT_SERVICE_URL", "http://82.202.141.104:8000")
+    
+    if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
+        return ""
+        
+    logger.info(f"Uploading {file_path} to STT service at {base_url}/transcribe")
     try:
-        return await asyncio.to_thread(_transcribe_audio_sync, file_path)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            with open(file_path, "rb") as f:
+                # Отправляем файл на сервер
+                files = {"file": (os.path.basename(file_path), f, "audio/wav")}
+                response = await client.post(f"{base_url}/transcribe", files=files)
+                
+            if response.status_code not in (200, 202):
+                logger.error(f"STT Upload Failed: {response.status_code} - {response.text}")
+                return ""
+                
+            data = response.json()
+            job_id = data.get("job_id")
+            
+            if not job_id:
+                logger.error("No job_id received from STT service.")
+                return ""
+                
+            logger.info(f"Upload successful. Polling job ID: {job_id}")
+            
+            # Поллинг статуса
+            max_attempts = 120  # ~4 минуты
+            for _ in range(max_attempts):
+                await asyncio.sleep(2.0)
+                
+                status_resp = await client.get(f"{base_url}/status/{job_id}")
+                
+                if status_resp.status_code == 404:
+                    logger.error(f"Task {job_id} not found on STT server.")
+                    break
+                    
+                status_data = status_resp.json()
+                status = status_data.get("status")
+                
+                if status == "done":
+                    logger.info(f"Transcription for {job_id} completed successfully.")
+                    return status_data.get("text", "")
+                elif status == "error":
+                    logger.error(f"Transcription error for {job_id}: {status_data.get('error')}")
+                    return ""
+                elif status in ["queued", "processing"]:
+                    # Продолжаем ждать
+                    continue
+                else:
+                    logger.warning(f"Unknown STT task status: {status_data}")
+                    
+            logger.error(f"Timeout waiting for STT transcription for job {job_id}")
+            return ""
+            
     except Exception as e:
-        logger.exception(f"ASR async error: {e}")
+        logger.exception(f"Exception during external STT processing: {e}")
         return ""

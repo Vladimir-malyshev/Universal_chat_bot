@@ -152,7 +152,7 @@ async def _call_gemini(messages: list, attachments: list, tools: list, api_key: 
             if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
                 for part in response.candidates[0].content.parts:
                     if part.thought:
-                        content_text += f"\n--- THOUGHT SUMMARY ---\n{part.text}\n-----------------------\n"
+                        logger.debug(f"Gemini Thoughts: {part.text}")
                     elif part.function_call:
                         import uuid
                         call_id = f"call_{uuid.uuid4().hex[:8]}"
